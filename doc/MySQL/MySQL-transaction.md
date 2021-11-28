@@ -104,9 +104,9 @@ MySQL中是通过隔离性来保证，隔离性的底层实现是通过锁和MVC
 
 - 读未提交：普通select不加锁
 - 串行化：普通select隐式加锁，普通select全部转换成加锁select（select ... in share mode）
-- 可重复读：普通select为快照读，update/delete/加锁select（select ... in share mode / for update）为当前读（行锁）
+- 可重复读（RR）：普通select为快照读，update/delete/加锁select（select ... in share mode / for update）为当前读（行锁）
      - 唯一索引查询条件（记录锁）、范围查询（间隙锁）
-- 读已提交：普通select为快照读，update/delete/加锁select（select ... in share mode / for update）为当前读（行锁）
+- 读已提交（RC）：普通select为快照读，update/delete/加锁select（select ... in share mode / for update）为当前读（行锁）
      - 唯一索引查询条件（记录锁），会产生幻读现象
 
 ##### 3.2.3、Mysql是如何在可重复读隔离级别解决幻读问题的？
@@ -155,7 +155,7 @@ commit;
 
 ###### 3.2.4.2、**MySQL的MVCC机制底层是如何实现的？**
 
-隐藏列
+**行记录的隐藏列**
 
 假设我们来设计数据多版本，按照最简单思路（例3.2-1），不考虑资源限制条件下直接在磁盘存多份数据就能实现这种效果，但显然存在存储资源问题，故不会被采用。
 
@@ -163,120 +163,78 @@ commit;
 
 - TRX_ID：更新该行数据的事务ID
 - ROW_ID：该行的唯一标识ID（当无主键时存在）
-- ROLLBACK_POINTER：回滚指针，它指向上一个版本，我们把指向的地址成为unlog的回滚段
+- ROLLBACK_POINTER：回滚指针，它指向上一个版本，我们把指向的地址回滚段中undolog的指针
 
 <div align=left><img src="./../../static/imgs/MySQL-MVCC.png" alt="MVCC存储结构" />
+**undolog**
 
-insert：delete record
+**上面提到的undolog，什么意思？**undolog是食事务未提时，会将事务旧版本的数据存放于undolog日志里，当事务回滚或数据崩溃时，可以利用undo日志，撤销未提交事务对数据的影响。
 
-delete：add record
+**undolog存什么？**
 
-update：copy ori record
+- insert：undolog日志存储新数据的ROW_ID(PK)，回滚时删除即可
+- delete/update：undolog存储旧版本数据的行记录，回滚时直接恢复即可
+
+**回滚段**
+
+回滚段是存储undolog的地方，一个回滚段对应一次事务执行的undolog集合（事务与回滚段的映射关系存在，便于快速查找到事务的历史数据版本快速回滚）。
+
+**快照（ReadView）**
+
+快照是什么？快照就是基于**整库的某个时刻的镜像**。在不同隔离级别下快照（READVIEW）产生时机不同，可重复读隔离级别是**事务启动时产生快照**，读已提交隔离级别是**执行更新动作时产生快照**。
 
 
 
-undolog
-
-redolog
-
-
-
-快照（READVIEW）
+首先，基于整库镜像，当然不是物理存储，假设整库100G，每个镜像100G，那数据库得崩溃。于是，就有了ReadView的数据结构来定义。
 
 - m_ids：当前系统中存活的事务id的列表
 - min_trx_id：当前系统中存活事务的最小事务id，即m_ids的最小值
 - max_trx_id：系统下一个即将分配的事务id，**即m_ids的最大值 + 1，**并不是m_ids的最大值
 - creator_trx_id：当前事务ID
 
+其中，(-∞，min_trx_id)为已提交事务，[min_trx_id,max_trx_id)为未提交事务, [max_trx_id, +∞]为未开始事务。通过这个规则来定义进行快照读的时候，确认行记录是否可读。
 
+- 如果落在已提交事务区间，表示这个版本是已提交的事务或者是当前事务自己生成的，这个数据是可见的；
 
-在不同隔离级别仅仅是快照（READVIEW）产生时机不同，可重复读隔离级别是在事务启动时产生快照，读已提交隔离级别是在执行更新动作的时候产生快照。
+- 如果落在未提交事务区间，表示这个版本是由将来启动的事务生成的，是肯定不可见的；
+- 如果落在未开始事务区间，那就包括两种情况
+  - 若 row trx_id 在数组中，表示这个版本是由还没提交的事务生成的，不可见；
+  - 若 row trx_id 不在数组中，表示这个版本是已经提交了的事务生成的，可见。
 
-问题2：
+总之，根据数据行中ROLLBAKCK_PTR能找到所有的回滚日志（历史版本数据），通过快照中事务活跃关系和数据行中TRX_ID来比对确定是否可读来执行快照读，最终实现了MVCC中数据多版本并发读写效果。
 
+### 4、如何实现事务回滚？
 
-
-版本是如何关联的
-
-redolog，虚拟行
-
-row_id
-
-
-
-问题2：事务间是如何知道可见性的
-
-readview
+根据事务ID找到对应的回滚段中的undolog，将回滚段里的日志进行清空即可。
 
 
 
-读方式
+### 5、数据库事务是怎么实现的？
 
-- 快照读
+参考：https://draveness.me/mysql-transaction/
 
-- 一致性读
+#### 5.1、原子性
 
+#### 5.2、隔离性
 
+#### 5.3、持久性
 
+#### 5.4、一致性
 
+不一致的时机：binlog、unlog、redolog、磁盘都可能出现不一致
 
-
-
-
+- A时机：写了redolog，写磁盘失败
+  - redolog：数据页记录与磁盘页比较，通过回放实现磁盘和redolog的一致
+- B时机：事务已提交，redolog写失败
+  - undolog/binlog：数据进行比较实现一致
 
 
 
 ### 参考
 
+1. MySQL技术内幕InnoDB存储引擎
+2. 深入理解分布式事务
 1. [https://draveness.me/mysql-transaction/](https://draveness.me/mysql-transaction/)
 2. [InnoDB-事务原理@www.corgiboy.com](https://www.corgiboy.com/InnoD%E5%BC%95%E6%93%8E/InnoDB-%E4%BA%8B%E5%8A%A1%E5%8E%9F%E7%90%86/)
-2. [xxxx@架构师之路](xxxx)
-2. MySQL技术内幕InnoDB存储引擎
-2. 深入理解分布式事务
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-1. 数据库为什么要有事务？ 一致性
-2. 事务包括哪几个特性？ ACID
-3. 事务的并发引起了哪些问题？ 幻读、脏读、可重复读
-4. 怎么解决事务并发出现的问题？读未提交、读提交、重复读、序列化
-5. 数据库通过什么方式保证事务的隔离性？锁
-6. 频繁加锁带来什么问题？性能下降
-7. 数据库如何解决加锁后的性能问题？ MVVC
-
-
-## 二、事务
-
-### 2.1、隔离性
-
-问题：脏读、幻读、不可重复读
-
-隔离级别
-- 读未提交：A事务未提交时，A事务的变更能被B事务看见
-- 读提交：一个事务提交后，它做的变更才会被其他事务看到
-- 可重复读：一个事务执行过程中看到的数据，永远跟事务启动时看到的数据是一致的。当然，可重复读隔离级别下，兼容读提交
-- 串行化：事务与事务完全串行
-
-
-## MVVC
-- 一致性读（普通查询）：根据row_trx_id和一致性视图确定数据版本的可见性
-- 对于读提交，查询只承认在语句启动前就已提交完成的数据
-- 对于可重复读，查询只承认在事务启动前就已提交完成的数据
-
-- 更新语句：更新数据都是先读后写，而这个读，只能读当前的值，称为"当前读"
-    - 当前读：总是读取已经提交完成的最新版本
+2. [InnoDB并发如此高，原因竟然在这？@架构师之路](https://mp.weixin.qq.com/s/fmzaIobOihKKZ7kyZQInTg)
+2. [MySQL-InnoDB究竟如何巧妙实现，4种事务的隔离级别@架构师之路](https://mp.weixin.qq.com/s/C25UbyVaRjqGP3ybIjQr-g)
