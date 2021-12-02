@@ -10,6 +10,7 @@
 ## 设计
 
 - [分布式系统设计模式](https://github.com/dreamhead/patterns-of-distributed-systems)
+- [数据密集型系统设计](https://vonng.gitbooks.io/ddia-cn/)
 
 
 
@@ -17,3 +18,11 @@
 
 - [谷歌工程实践](github.com/google/eng-practices)
 - [谷歌工程实践-中文版](https://jimmysong.io/eng-practices/)
+
+
+
+## 精选
+
+https://www.cnblogs.com/rjzheng/
+
+https://draveness.me/

@@ -1,4 +1,4 @@
-# MYSQL事务
+# MySQL事务
 
 ### 1、事务是什么？
 事务通常指的是逻辑上的一组操作，要么全部执行成功，要么全部执行失败。总体来说，他们具备ACID四大特性，分别是原子性（Atomioc）、一致性（Consistency）、隔离性（Isolation）和持久性（Durability）。其中，事务的隔离型由锁和MVCC机制实现啊，原子性和持久性由RedoLog实现，一致性由UndoLog实现的。
@@ -203,7 +203,13 @@ commit;
 
 总之，根据数据行中ROLLBAKCK_PTR能找到所有的回滚日志（历史版本数据），通过快照中事务活跃关系和数据行中TRX_ID来比对确定是否可读来执行快照读，最终实现了MVCC中数据多版本并发读写效果。
 
-### 4、如何实现事务回滚？
+### 4、事务的执行流程
+
+#### 4.1、事务是如何执行的？
+
+
+
+#### 4.2、事务是如何回滚的？
 
 根据事务ID找到对应的回滚段中的undolog，将回滚段里的日志进行清空即可。
 
@@ -213,22 +219,31 @@ commit;
 
 参考：https://draveness.me/mysql-transaction/
 
-#### 5.1、原子性
+原子性和持久性由RedoLog实现，一致性由UndoLog实现，隔离性由MVCC和锁实现。
 
-#### 5.2、隔离性
+#### 5.1、原子性&持久性
 
-#### 5.3、持久性
+严格说，原子性和持久性由RedoLog和UndoLog保证。当然，说RedoLog也是可接受的，因为UndoLog也会产生RedoLog。UndoLog的完整性和可靠性需要RedoLog保证，因此数据库崩溃时需要先做RedoLog恢复，然后再做UndoLog回滚。
 
-#### 5.4、一致性
+总之，RedoLog的持久化保证了数据持久化到磁盘，又影响到UndoLog的可靠和完整，最终实现原子性和持久性。UndoLog用于对事务的影响进行撤销，RedoLog在错误处理时，对已提交的事务进行重做。
 
-不一致的时机：binlog、unlog、redolog、磁盘都可能出现不一致
+- 发生错误或需要回滚的事务能够成功回滚（原子性）；
+- 在事务提交后，数据没得急写磁盘就宕机时，在下次重新启动后能够恢复数据（持久性）；
+
+#### 5.3、一致性
+
+原子性&持久性&原子性都保证了，一致性就保证了。
+
+不一致的时机：unlog、redolog、磁盘都可能出现不一致
 
 - A时机：写了redolog，写磁盘失败
   - redolog：数据页记录与磁盘页比较，通过回放实现磁盘和redolog的一致
 - B时机：事务已提交，redolog写失败
   - undolog/binlog：数据进行比较实现一致
 
+#### 5.4、隔离性
 
+MVCC和锁
 
 ### 参考
 
@@ -238,3 +253,4 @@ commit;
 2. [InnoDB-事务原理@www.corgiboy.com](https://www.corgiboy.com/InnoD%E5%BC%95%E6%93%8E/InnoDB-%E4%BA%8B%E5%8A%A1%E5%8E%9F%E7%90%86/)
 2. [InnoDB并发如此高，原因竟然在这？@架构师之路](https://mp.weixin.qq.com/s/fmzaIobOihKKZ7kyZQInTg)
 2. [MySQL-InnoDB究竟如何巧妙实现，4种事务的隔离级别@架构师之路](https://mp.weixin.qq.com/s/C25UbyVaRjqGP3ybIjQr-g)
+2. [https://www.cnblogs.com/rjzheng/p/10841031.html](https://www.cnblogs.com/rjzheng/p/10841031.html)
