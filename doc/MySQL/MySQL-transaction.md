@@ -1,5 +1,3 @@
-# MySQL事务原理
-
 ## 1、事务是什么？
 事务通常指的是逻辑上的一组操作，要么全部执行成功，要么全部执行失败。总体来说，他们具备ACID四大特性，分别是原子性（Atomioc）、一致性（Consistency）、隔离性（Isolation）和持久性（Durability）。其中，事务的隔离型由锁和MVCC机制实现啊，原子性和持久性由RedoLog实现，一致性由UndoLog实现的。
 
